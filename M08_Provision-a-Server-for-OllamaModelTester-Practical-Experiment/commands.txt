@@ -1,0 +1,117 @@
+# VM INSTALLATION
+# VM Instance Installation
+ssh-keygen -t rsa -b 4096 -f ~/.ssh/my-gcp-key -C "ubuntu"
+cat ~/.ssh/my-gcp-key.pub
+ssh -i ~/.ssh/my-gcp-key ubuntu@EXTERNAL_IP
+
+# XRDP XFCE4
+sudo apt update && sudo apt upgrade -y
+sudo apt install xfce4 xfce4-goodies -y
+sudo apt install xrdp -y
+sudo systemctl status xrdp
+sudo adduser xrdp ssl-cert
+echo "xfce4-session" > ~/.xsession
+sudo systemctl restart xrdp
+sudo ufw status
+sudo ufw allow from <trusted_IP_address> to any port 3389
+sudo ufw allow OpenSSH
+sudo ufw enable
+
+sudo passwd ubuntu
+
+# Security
+sudo apt install fail2ban -y
+sudo systemctl enable --now fail2ban
+sudo systemctl enable --now xrdp
+sudo ufw allow 3389/tcp
+sudo systemctl status xrdp
+
+# Add my-gcp-key public key
+nano ~/.ssh/authorized_keys 
+
+sudo nano /etc/ssh/sshd_config
+
+PermitRootLogin no
+PubkeyAuthentication yes
+PasswordAuthentication no
+
+sudo sshd -t
+sudo systemctl reload ssh
+
+sudo sshd -T | grep permitrootlogin
+
+# RDP Login
+# Docker installation
+
+sudo apt remove $(dpkg --get-selections docker.io docker-compose docker-compose-v2 docker-doc docker-buildx podman-docker containerd runc | cut -f1)
+
+sudo apt update
+sudo apt install ca-certificates curl
+sudo install -m 0755 -d /etc/apt/keyrings
+sudo curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc
+
+sudo chmod a+r /etc/apt/keyrings/docker.asc
+
+sudo tee /etc/apt/sources.list.d/docker.sources <<EOF
+Types: deb
+URIs: https://download.docker.com/linux/ubuntu
+Suites: $(. /etc/os-release && echo "${UBUNTU_CODENAME:-$VERSION_CODENAME}")
+Components: stable
+Architectures: $(dpkg --print-architecture)
+Signed-By: /etc/apt/keyrings/docker.asc
+EOF
+sudo apt update
+
+sudo apt install docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+
+sudo systemctl status docker
+sudo systemctl start docker
+
+sudo docker run hello-world
+
+# Install Minikube
+curl -LO https://github.com/kubernetes/minikube/releases/latest/download/minikube-linux-amd64
+
+sudo install minikube-linux-amd64 /usr/local/bin/minikube && rm minikube-linux-amd64
+
+minikube start --cpus=2 --memory=3000 --driver=docker --container-runtime=docker
+sudo usermod -aG docker $USER && newgrp docker
+
+minikube status
+minikube ssh -- "sudo systemctl status docker"
+minikube ssh -- "sudo systemctl unmask docker"
+minikube ssh -- "sudo systemctl restart docker"
+
+alias kubectl="minikube kubectl --"
+
+# Install browser
+sudo apt install -y wget apt-transport-https
+wget -q https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb
+sudo dpkg -i google-chrome-stable_current_amd64.deb
+sudo apt install -f
+rm google-chrome-stable_current_amd64.deb
+
+# Install Git
+sudo apt-get install git
+git config --list --show-origin
+
+git config --global user.name "Git username"
+git config --global user.email "Git email"
+
+# Minikube Addons
+minikube addons list
+minikube addons enable metrics-server
+minikube dashboard
+
+# Install Nginx
+sudo apt install nginx
+sudo ufw allow 'Nginx Full'
+sudo ufw allow 80/tcp
+sudo ufw allow 443/tcp
+sudo systemctl reload nginx
+
+# Install Certbot
+sudo apt install pipx
+pipx install certbot
+pipx ensurepath
+source ~/.bashrc
