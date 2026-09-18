@@ -1,0 +1,135 @@
+# Deploy on VM instance
+sudo systemctl status nginx
+sudo systemctl status docker
+minikube start --cpus=2 --memory=4096 --driver=docker --container-runtime=docker
+
+minikube status
+minikube ssh -- "sudo systemctl status docker"
+alias kubectl="minikube kubectl --"
+
+---
+
+# Git create a new local branch and commit the changes
+git checkout -b feat/Add-docker-folder
+git add .
+git commit -m "feat: Add Docker folder"
+git push -u origin feat/Add-docker-folder
+gh pr create \
+  --title "feat: Add Docker folder" \
+  --body "" \
+  --base main \
+  --head feat/Add-docker-folder \
+  --assignee "@me" \
+  --label "enhancement"
+
+# Git pull project on VM instance
+mkdir ~/.projects
+cd ~/.projects
+git clone "https://github.com/theshaftman/OllamaModelTesterWeb.git"
+cd ~/.projects/OllamaModelTesterWeb/
+
+# Open new branch and pull latest changes on VM instance
+git fetch origin
+git checkout feat/Add-docker-folder
+git pull origin feat/Add-docker-folder
+
+---
+
+# Deploy Backend
+# Create a Docker image in Kubernetes (Minikube)
+minikube image build -t ollama-tester-backend:latest ./backend/. -v=4
+
+# Publish the deployment and service in Kubernetes (Minikube)
+minikube kubectl -- apply -f ./backend/k8s/backend-deployment.yaml
+
+---
+
+# Deploy frontend
+# Create a Docker image in Kubernetes (Minikube)
+minikube image build -t ollama-tester-frontend:latest ./frontend/. -v=4
+
+# Publish the deployment and service in Kubernetes (Minikube)
+minikube kubectl -- apply -f ./frontend/k8s/frontend-deployment.yaml
+
+# Validate frontend access locally on the VM instance
+minikube service ollama-tester-frontend-service --url
+
+---
+
+# Delete Docker images
+kubectl delete deployment ollama-tester-backend
+kubectl delete service ollama-tester-backend-service
+minikube ssh -- "docker images"
+minikube ssh -- sudo docker rmi ollama-tester-backend:latest
+
+docker system prune -a -f
+minikube ssh -- "docker system prune -a -f"
+
+---
+
+# Confirm all deployments are working correct
+kubectl get pods
+kubectl get services
+kubectl get deployments
+kubectl get svc
+kubectl describe deployments
+
+---
+
+# Install DNS Desec SSL Certificate by Certbot
+pipx inject certbot certbot-dns-desec
+mkdir -p ~/.secrets/certbot
+nano ~/.secrets/certbot/desec.ini
+
+dns_desec_token = Token_Management_Content
+
+chmod 600 ~/.secrets/certbot/desec.ini
+
+sudo /home/ubuntu/.local/bin/certbot certonly \
+  --authenticator dns-desec \
+  --dns-desec-credentials ~/.secrets/certbot/desec.ini \
+  --dns-desec-propagation-seconds 300 \
+  -d ollamamodeltester.dedyn.io \
+  --non-interactive \
+  --agree-tos \
+  -m mariyan.apostolov89@gmail.com
+
+---
+
+# Configure NginX sites available default routing
+sudo nano /etc/nginx/sites-available/default
+
+# Redirect HTTP to HTTPS
+server {
+    listen 80 default_server;
+    listen [::]:80 default_server;
+    server_name ollamamodeltester.dedyn.io;
+    return 301 https://$server_name$request_uri;
+}
+
+# HTTPS server
+server {
+    listen 443 ssl default_server;
+    listen [::]:443 ssl default_server;
+    server_name ollamamodeltester.dedyn.io;
+
+    # SSL Certificate paths (from Certbot)
+    ssl_certificate /etc/letsencrypt/live/ollamamodeltester.dedyn.io/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/ollamamodeltester.dedyn.io/privkey.pem;
+
+    # Proxy to Minikube frontend
+    location / {
+        proxy_pass http://MINIKUBE_IP:NodePort;   # Replace with your Minikube IP and NodePort
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection 'upgrade';
+        proxy_set_header Host $host;
+        proxy_cache_bypass $http_upgrade;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+}
+
+sudo nginx -t
+sudo systemctl reload nginx
